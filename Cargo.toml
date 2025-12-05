@@ -1,0 +1,35 @@
+[package]
+name = "order_matching_engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = "0.8.7"
+tokio = { version = "1", features = ["full"] }
+
+# Serialization/Deserialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Unique ID generation
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# For thread-safe data structures
+parking_lot = "0.12"
+
+# For metrics and latency tracking
+hdrhistogram = "7"
+
+# Tracing for logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Tower for middleware
+tower = "0.5.2"
+tower-http = { version = "0.6.7", features = ["trace", "cors"] }
+
+# For ordered maps (BTreeMap is in std, but we might want more)
+indexmap = "2"
