@@ -142,5 +142,5 @@ Run unit, integration and performance tests with:
 ```
 cargo test
 ```
-  - These performance tests will fail when cargo test is run normally. These tests need to be run individually using `cargo test --release test_http_latency_measurements -- --nocapture`, `cargo test --release test_http_throughput_concurrent -- --nocapture` and `cargo test --release load_test_60_seconds_http -- --nocapture` respectively.
+  - Three performance tests will fail when cargo test is run normally. These tests need to be run individually using `cargo test --release test_http_latency_measurements -- --nocapture`, `cargo test --release test_http_throughput_concurrent -- --nocapture` and `cargo test --release load_test_60_seconds_http -- --nocapture` respectively.
 
