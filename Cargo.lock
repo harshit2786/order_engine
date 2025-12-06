@@ -530,6 +530,7 @@ dependencies = [
  "axum",
  "chrono",
  "hdrhistogram",
+ "http-body-util",
  "indexmap",
  "parking_lot",
  "serde",

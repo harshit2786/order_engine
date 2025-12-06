@@ -1,16 +1,16 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{ BTreeMap, HashMap };
 use uuid::Uuid;
 
-use crate::models::order::{Order, Side};
-use crate::models::orderbook::{OrderBookResponse, PriceLevelInfo};
+use crate::models::order::{ Order, Side };
+use crate::models::orderbook::{ OrderBookResponse, PriceLevelInfo };
 use crate::orderbook::price_level::PriceLevel;
 
 /// Order book for a single symbol.
-/// 
+///
 /// Uses BTreeMap for price levels to maintain sorted order:
 /// - Bids: Highest price first (reverse iteration)
 /// - Asks: Lowest price first (forward iteration)
-/// 
+///
 /// Uses HashMap for O(1) order lookup by ID.
 #[derive(Debug)]
 pub struct OrderBook {
@@ -32,7 +32,25 @@ impl OrderBook {
             order_locations: HashMap::new(),
         }
     }
+    /// Returns a reference to the bids BTreeMap
+    pub fn bids(&self) -> &BTreeMap<u64, PriceLevel> {
+        &self.bids
+    }
 
+    /// Returns a mutable reference to the bids BTreeMap
+    pub fn bids_mut(&mut self) -> &mut BTreeMap<u64, PriceLevel> {
+        &mut self.bids
+    }
+
+    /// Returns a reference to the asks BTreeMap
+    pub fn asks(&self) -> &BTreeMap<u64, PriceLevel> {
+        &self.asks
+    }
+
+    /// Returns a mutable reference to the asks BTreeMap
+    pub fn asks_mut(&mut self) -> &mut BTreeMap<u64, PriceLevel> {
+        &mut self.asks
+    }
     /// Adds a limit order to the book
     pub fn add_order(&mut self, order: Order) {
         let price = order.price.expect("Order must have a price to be added to book");
@@ -147,12 +165,18 @@ impl OrderBook {
 
     /// Returns total quantity available on the bid side
     pub fn total_bid_quantity(&self) -> u64 {
-        self.bids.values().map(|l| l.total_quantity()).sum()
+        self.bids
+            .values()
+            .map(|l| l.total_quantity())
+            .sum()
     }
 
     /// Returns total quantity available on the ask side
     pub fn total_ask_quantity(&self) -> u64 {
-        self.asks.values().map(|l| l.total_quantity()).sum()
+        self.asks
+            .values()
+            .map(|l| l.total_quantity())
+            .sum()
     }
 
     /// Returns total number of orders in the book
@@ -183,8 +207,7 @@ impl OrderBook {
     /// Creates an OrderBookResponse with the specified depth
     pub fn to_response(&self, depth: usize) -> OrderBookResponse {
         // Bids: highest price first (reverse order)
-        let bids: Vec<PriceLevelInfo> = self
-            .bids
+        let bids: Vec<PriceLevelInfo> = self.bids
             .iter()
             .rev()
             .take(depth)
@@ -195,8 +218,7 @@ impl OrderBook {
             .collect();
 
         // Asks: lowest price first (forward order)
-        let asks: Vec<PriceLevelInfo> = self
-            .asks
+        let asks: Vec<PriceLevelInfo> = self.asks
             .iter()
             .take(depth)
             .map(|(price, level)| PriceLevelInfo {
@@ -222,7 +244,7 @@ impl OrderBook {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::order::{CreateOrderRequest, OrderType};
+    use crate::models::order::{ CreateOrderRequest, OrderType };
 
     fn create_limit_order(side: Side, price: u64, quantity: u64) -> Order {
         let request = CreateOrderRequest {

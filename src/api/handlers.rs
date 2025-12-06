@@ -101,7 +101,7 @@ pub async fn health_check(State(state): State<AppState>) -> Json<HealthResponse>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::order::{ OrderStatus, OrderType, Side };
+    use crate::models::order::{ OrderType, Side };
     use axum::{ body::Body, http::{ Request, StatusCode } };
     use http_body_util::BodyExt;
     use serde_json::json;

@@ -33,3 +33,4 @@ tower-http = { version = "0.6.7", features = ["trace", "cors"] }
 
 # For ordered maps (BTreeMap is in std, but we might want more)
 indexmap = "2"
+http-body-util = "0.1.3"

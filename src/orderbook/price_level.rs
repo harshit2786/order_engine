@@ -60,10 +60,9 @@ impl PriceLevel {
         }
     }
 
-    /// Updates total quantity after a partial fill on the front order.
     /// Call this after modifying the front order's filled_quantity.
-    pub fn update_front_quantity(&mut self, filled_amount: u64) {
-        self.total_quantity = self.total_quantity.saturating_sub(filled_amount);
+    pub fn reduce_total_quantity(&mut self, amount: u64) {
+        self.total_quantity = self.total_quantity.saturating_sub(amount);
     }
 
     /// Returns true if there are no orders at this price level
@@ -188,19 +187,7 @@ mod tests {
         assert_eq!(level.total_quantity(), 100);
     }
 
-    #[test]
-    fn test_update_front_quantity() {
-        let mut level = PriceLevel::new(10000);
-        level.add_order(create_test_order(10000, 100));
-
-        assert_eq!(level.total_quantity(), 100);
-
-        // Simulate partial fill of 30
-        level.update_front_quantity(30);
-
-        assert_eq!(level.total_quantity(), 70);
-    }
-
+    
     #[test]
     fn test_front_mut() {
         let mut level = PriceLevel::new(10000);

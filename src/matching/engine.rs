@@ -5,11 +5,17 @@ use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::models::order::{
-    CancelOrderResponse, CreateOrderRequest, Order, OrderStatus, OrderStatusResponse,
-    OrderType, Side, SubmitOrderResponse,
+    CancelOrderResponse,
+    CreateOrderRequest,
+    Order,
+    OrderStatus,
+    OrderStatusResponse,
+    OrderType,
+    Side,
+    SubmitOrderResponse,
 };
 use crate::models::orderbook::OrderBookResponse;
-use crate::models::trade::{Trade, TradeInfo};
+use crate::models::trade::{ Trade, TradeInfo };
 use crate::orderbook::book::OrderBook;
 
 /// Result of a matching operation
@@ -28,11 +34,17 @@ impl MatchResult {
     }
 
     pub fn to_trade_info_list(&self) -> Vec<TradeInfo> {
-        self.trades.iter().map(|t| t.to_trade_info()).collect()
+        self.trades
+            .iter()
+            .map(|t| t.to_trade_info())
+            .collect()
     }
 
     pub fn total_filled_quantity(&self) -> u64 {
-        self.trades.iter().map(|t| t.quantity).sum()
+        self.trades
+            .iter()
+            .map(|t| t.quantity)
+            .sum()
     }
 }
 
@@ -43,7 +55,7 @@ impl Default for MatchResult {
 }
 
 /// The core matching engine
-/// 
+///
 /// Thread-safe via RwLock - allows concurrent reads, exclusive writes
 pub struct MatchingEngine {
     /// Order books per symbol
@@ -66,12 +78,10 @@ impl MatchingEngine {
     /// Submits a new order for processing
     pub fn submit_order(
         &self,
-        request: CreateOrderRequest,
+        request: CreateOrderRequest
     ) -> Result<SubmitOrderResponse, AppError> {
         // Validate request
-        request
-            .validate()
-            .map_err(|e| AppError::InvalidOrder(e))?;
+        request.validate().map_err(|e| AppError::InvalidOrder(e))?;
 
         let mut order = Order::new(request);
         let symbol = order.symbol.clone();
@@ -90,7 +100,7 @@ impl MatchingEngine {
     fn process_market_order(
         &self,
         order: &mut Order,
-        symbol: &str,
+        symbol: &str
     ) -> Result<SubmitOrderResponse, AppError> {
         let mut order_books = self.order_books.write();
 
@@ -116,10 +126,7 @@ impl MatchingEngine {
         let match_result = self.match_order(order, book);
 
         // Market order should be fully filled at this point
-        assert!(
-            order.is_filled(),
-            "Market order should be fully filled after matching"
-        );
+        assert!(order.is_filled(), "Market order should be fully filled after matching");
 
         // Update trade count
         {
@@ -133,11 +140,13 @@ impl MatchingEngine {
             orders.insert(order.id, order.clone());
         }
 
-        Ok(SubmitOrderResponse::filled(
-            order.id,
-            order.filled_quantity,
-            match_result.to_trade_info_list(),
-        ))
+        Ok(
+            SubmitOrderResponse::filled(
+                order.id,
+                order.filled_quantity,
+                match_result.to_trade_info_list()
+            )
+        )
     }
 
     /// Processes a limit order
@@ -145,7 +154,7 @@ impl MatchingEngine {
     fn process_limit_order(
         &self,
         order: &mut Order,
-        symbol: &str,
+        symbol: &str
     ) -> Result<SubmitOrderResponse, AppError> {
         let mut order_books = self.order_books.write();
 
@@ -169,7 +178,7 @@ impl MatchingEngine {
             SubmitOrderResponse::filled(
                 order.id,
                 order.filled_quantity,
-                match_result.to_trade_info_list(),
+                match_result.to_trade_info_list()
             )
         } else if order.filled_quantity > 0 {
             // Partially filled - add remaining to book
@@ -178,7 +187,7 @@ impl MatchingEngine {
                 order.id,
                 order.filled_quantity,
                 order.remaining_quantity(),
-                match_result.to_trade_info_list(),
+                match_result.to_trade_info_list()
             )
         } else {
             // No fill - add to book
@@ -214,7 +223,7 @@ impl MatchingEngine {
 
         // Collect prices to process (to avoid borrow issues)
         let ask_prices: Vec<u64> = book
-            .asks
+            .asks()
             .keys()
             .copied()
             .take_while(|&ask_price| {
@@ -239,7 +248,7 @@ impl MatchingEngine {
 
         // Collect prices to process (highest first for bids)
         let bid_prices: Vec<u64> = book
-            .bids
+            .bids()
             .keys()
             .rev()
             .copied()
@@ -266,71 +275,86 @@ impl MatchingEngine {
         book: &mut OrderBook,
         book_side: Side,
         price: u64,
-        result: &mut MatchResult,
+        result: &mut MatchResult
     ) {
-        let book_levels = match book_side {
-            Side::Buy => &mut book.bids,
-            Side::Sell => &mut book.asks,
-        };
-
-        let level = match book_levels.get_mut(&price) {
-            Some(l) => l,
-            None => return,
-        };
-
-        // Track orders to remove after matching
+        // Track orders to remove
         let mut orders_to_remove: Vec<Uuid> = Vec::new();
+        let mut filled_order_ids_and_qty: Vec<(Uuid, u64)> = Vec::new();
 
-        while !incoming_order.is_filled() {
-            let resting_order = match level.front_mut() {
-                Some(o) => o,
-                None => break,
+        // Scope the mutable borrow of book_levels
+        {
+            let book_levels = match book_side {
+                Side::Buy => book.bids_mut(),
+                Side::Sell => book.asks_mut(),
             };
 
-            // Calculate fill quantity
-            let fill_qty = std::cmp::min(
-                incoming_order.remaining_quantity(),
-                resting_order.remaining_quantity(),
-            );
-
-            // Determine buyer and seller
-            let (buyer_id, seller_id) = match incoming_order.side {
-                Side::Buy => (incoming_order.id, resting_order.id),
-                Side::Sell => (resting_order.id, incoming_order.id),
+            let level = match book_levels.get_mut(&price) {
+                Some(l) => l,
+                None => {
+                    return;
+                }
             };
 
-            // Create trade
-            let trade = Trade::new(
-                incoming_order.symbol.clone(),
-                price,
-                fill_qty,
-                buyer_id,
-                seller_id,
-                incoming_order.side, // Incoming order is the taker
-            );
+            while !incoming_order.is_filled() {
+                let resting_order = match level.front_mut() {
+                    Some(o) => o,
+                    None => {
+                        break;
+                    }
+                };
 
-            // Update orders
-            incoming_order.fill(fill_qty);
-            resting_order.fill(fill_qty);
+                // Calculate fill quantity
+                let fill_qty = std::cmp::min(
+                    incoming_order.remaining_quantity(),
+                    resting_order.remaining_quantity()
+                );
 
-            // Update resting order in storage
-            {
-                let mut orders = self.orders.write();
-                if let Some(stored_order) = orders.get_mut(&resting_order.id) {
-                    stored_order.fill(fill_qty);
+                // Determine buyer and seller
+                let (buyer_id, seller_id) = match incoming_order.side {
+                    Side::Buy => (incoming_order.id, resting_order.id),
+                    Side::Sell => (resting_order.id, incoming_order.id),
+                };
+
+                let resting_order_id = resting_order.id;
+
+                // Create trade
+                let trade = Trade::new(
+                    incoming_order.symbol.clone(),
+                    price,
+                    fill_qty,
+                    buyer_id,
+                    seller_id,
+                    incoming_order.side
+                );
+
+                // Update orders
+                incoming_order.fill(fill_qty);
+                resting_order.fill(fill_qty);
+
+                // Track for storage update
+                filled_order_ids_and_qty.push((resting_order_id, fill_qty));
+
+                result.trades.push(trade);
+
+                // If resting order is filled, remove from level
+                if resting_order.is_filled() {
+                    level.pop_front();
+                    orders_to_remove.push(resting_order_id);
+                } else {
+                    // Partially filled, reduce level quantity
+                    level.reduce_total_quantity(fill_qty);
                 }
             }
+        }
+        // Mutable borrow of book_levels ends here
 
-            // Update level quantity
-            level.update_front_quantity(fill_qty);
-
-            result.trades.push(trade);
-
-            // If resting order is filled, mark for removal
-            if resting_order.is_filled() {
-                let order_id = resting_order.id;
-                level.pop_front();
-                orders_to_remove.push(order_id);
+        // Update resting orders in storage
+        {
+            let mut orders = self.orders.write();
+            for (order_id, fill_qty) in filled_order_ids_and_qty {
+                if let Some(stored_order) = orders.get_mut(&order_id) {
+                    stored_order.fill(fill_qty);
+                }
             }
         }
 
@@ -340,19 +364,23 @@ impl MatchingEngine {
         }
 
         // Clean up empty price level
-        if level.is_empty() {
-            book_levels.remove(&price);
+        let book_levels = match book_side {
+            Side::Buy => book.bids_mut(),
+            Side::Sell => book.asks_mut(),
+        };
+
+        if let Some(level) = book_levels.get(&price) {
+            if level.is_empty() {
+                book_levels.remove(&price);
+            }
         }
     }
-
     /// Cancels an order by ID
     pub fn cancel_order(&self, order_id: Uuid) -> Result<CancelOrderResponse, AppError> {
         // Check if order exists and its status
         {
             let orders = self.orders.read();
-            let order = orders
-                .get(&order_id)
-                .ok_or(AppError::OrderNotFound(order_id))?;
+            let order = orders.get(&order_id).ok_or(AppError::OrderNotFound(order_id))?;
 
             // Cannot cancel filled orders
             if order.status == OrderStatus::Filled {
@@ -368,7 +396,7 @@ impl MatchingEngine {
         // Remove from order book
         {
             let mut order_books = self.order_books.write();
-            
+
             // Find and remove from appropriate order book
             for book in order_books.values_mut() {
                 if book.remove_order(order_id).is_some() {
@@ -391,9 +419,7 @@ impl MatchingEngine {
     /// Gets order status by ID
     pub fn get_order(&self, order_id: Uuid) -> Result<OrderStatusResponse, AppError> {
         let orders = self.orders.read();
-        let order = orders
-            .get(&order_id)
-            .ok_or(AppError::OrderNotFound(order_id))?;
+        let order = orders.get(&order_id).ok_or(AppError::OrderNotFound(order_id))?;
 
         Ok(order.to_status_response())
     }
@@ -411,7 +437,10 @@ impl MatchingEngine {
     /// Gets total number of orders currently in all order books
     pub fn orders_in_book(&self) -> usize {
         let order_books = self.order_books.read();
-        order_books.values().map(|b| b.total_order_count()).sum()
+        order_books
+            .values()
+            .map(|b| b.total_order_count())
+            .sum()
     }
 
     /// Gets total number of trades executed
@@ -472,7 +501,7 @@ mod tests {
             quantity,
         }
     }
-// ==================== Submit Order Tests ====================
+    // ==================== Submit Order Tests ====================
 
     #[test]
     fn test_submit_limit_order_no_match() {
@@ -639,15 +668,9 @@ mod tests {
         let engine = MatchingEngine::new();
 
         // Add sell orders at different prices
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10200, 50))
-            .unwrap();
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10100, 50))
-            .unwrap();
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10000, 50))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10200, 50)).unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10100, 50)).unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10000, 50)).unwrap();
 
         // Buy order should match lowest ask first
         let buy_request = create_limit_request(Side::Buy, 10200, 100);
@@ -670,15 +693,9 @@ mod tests {
         let engine = MatchingEngine::new();
 
         // Add buy orders at different prices
-        engine
-            .submit_order(create_limit_request(Side::Buy, 9800, 50))
-            .unwrap();
-        engine
-            .submit_order(create_limit_request(Side::Buy, 9900, 50))
-            .unwrap();
-        engine
-            .submit_order(create_limit_request(Side::Buy, 10000, 50))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 9800, 50)).unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 9900, 50)).unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 10000, 50)).unwrap();
 
         // Sell order should match highest bid first
         let sell_request = create_limit_request(Side::Sell, 9800, 100);
@@ -890,18 +907,10 @@ mod tests {
         let engine = MatchingEngine::new();
 
         // Add some orders
-        engine
-            .submit_order(create_limit_request(Side::Buy, 9900, 100))
-            .unwrap();
-        engine
-            .submit_order(create_limit_request(Side::Buy, 10000, 50))
-            .unwrap();
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10100, 75))
-            .unwrap();
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10200, 25))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 9900, 100)).unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 10000, 50)).unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10100, 75)).unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10200, 25)).unwrap();
 
         let book = engine.get_order_book("AAPL", 10);
 
@@ -939,9 +948,7 @@ mod tests {
 
         // Add 5 price levels
         for i in 0..5 {
-            engine
-                .submit_order(create_limit_request(Side::Buy, 10000 - i * 100, 100))
-                .unwrap();
+            engine.submit_order(create_limit_request(Side::Buy, 10000 - i * 100, 100)).unwrap();
         }
 
         let book = engine.get_order_book("AAPL", 3);
@@ -959,12 +966,8 @@ mod tests {
     fn test_metrics_orders_received() {
         let engine = MatchingEngine::new();
 
-        engine
-            .submit_order(create_limit_request(Side::Buy, 10000, 100))
-            .unwrap();
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10100, 50))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 10000, 100)).unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10100, 50)).unwrap();
 
         assert_eq!(engine.orders_received(), 2);
     }
@@ -974,14 +977,10 @@ mod tests {
         let engine = MatchingEngine::new();
 
         // Add sell order
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10000, 100))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10000, 100)).unwrap();
 
         // Add matching buy order
-        engine
-            .submit_order(create_limit_request(Side::Buy, 10000, 100))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 10000, 100)).unwrap();
 
         // Both orders were matched
         assert_eq!(engine.orders_matched(), 2);
@@ -1008,14 +1007,10 @@ mod tests {
         let engine = MatchingEngine::new();
 
         // Add sell order
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10000, 100))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10000, 100)).unwrap();
 
         // Add matching buy order
-        engine
-            .submit_order(create_limit_request(Side::Buy, 10000, 100))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 10000, 100)).unwrap();
 
         assert_eq!(engine.trades_executed(), 1);
     }
@@ -1025,17 +1020,11 @@ mod tests {
         let engine = MatchingEngine::new();
 
         // Add multiple sell orders
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10000, 50))
-            .unwrap();
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10100, 50))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10000, 50)).unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10100, 50)).unwrap();
 
         // Buy order matches both
-        engine
-            .submit_order(create_limit_request(Side::Buy, 10100, 100))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 10100, 100)).unwrap();
 
         assert_eq!(engine.trades_executed(), 2);
     }
@@ -1047,14 +1036,10 @@ mod tests {
         let engine = MatchingEngine::new();
 
         // Add sell order at 10100
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10100, 100))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10100, 100)).unwrap();
 
         // Add buy order at 10000 (below ask)
-        let response = engine
-            .submit_order(create_limit_request(Side::Buy, 10000, 100))
-            .unwrap();
+        let response = engine.submit_order(create_limit_request(Side::Buy, 10000, 100)).unwrap();
 
         match response {
             SubmitOrderResponse::Accepted(_) => {}
@@ -1071,14 +1056,10 @@ mod tests {
         let engine = MatchingEngine::new();
 
         // Add buy order at 10000
-        engine
-            .submit_order(create_limit_request(Side::Buy, 10000, 100))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 10000, 100)).unwrap();
 
         // Add sell order at 10100 (above bid)
-        let response = engine
-            .submit_order(create_limit_request(Side::Sell, 10100, 100))
-            .unwrap();
+        let response = engine.submit_order(create_limit_request(Side::Sell, 10100, 100)).unwrap();
 
         match response {
             SubmitOrderResponse::Accepted(_) => {}
@@ -1095,9 +1076,7 @@ mod tests {
         let engine = MatchingEngine::new();
 
         // Add orders for AAPL
-        engine
-            .submit_order(create_limit_request(Side::Buy, 10000, 100))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 10000, 100)).unwrap();
 
         // Add orders for different symbol
         let btc_request = CreateOrderRequest {
@@ -1214,9 +1193,7 @@ mod tests {
 
         // Add many small sell orders
         for i in 0..10 {
-            engine
-                .submit_order(create_limit_request(Side::Sell, 10000 + i * 10, 10))
-                .unwrap();
+            engine.submit_order(create_limit_request(Side::Sell, 10000 + i * 10, 10)).unwrap();
         }
 
         // Large buy order that matches all of them
@@ -1234,20 +1211,14 @@ mod tests {
         assert_eq!(engine.orders_in_book(), 0);
         assert_eq!(engine.trades_executed(), 10);
     }
-        #[test]
+    #[test]
     fn test_aggregated_quantity_at_price_level() {
         let engine = MatchingEngine::new();
 
         // Add multiple orders at same price
-        engine
-            .submit_order(create_limit_request(Side::Buy, 10000, 100))
-            .unwrap();
-        engine
-            .submit_order(create_limit_request(Side::Buy, 10000, 50))
-            .unwrap();
-        engine
-            .submit_order(create_limit_request(Side::Buy, 10000, 75))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 10000, 100)).unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 10000, 50)).unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 10000, 75)).unwrap();
 
         let book = engine.get_order_book("AAPL", 10);
 
@@ -1262,15 +1233,9 @@ mod tests {
         let engine = MatchingEngine::new();
 
         // Add sell orders at different prices
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10000, 30))
-            .unwrap();
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10100, 30))
-            .unwrap();
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10200, 40))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10000, 30)).unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10100, 30)).unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10200, 40)).unwrap();
 
         // Market buy should fill across all levels
         let buy_request = create_market_request(Side::Buy, 100);
@@ -1345,14 +1310,10 @@ mod tests {
         let engine = MatchingEngine::new();
 
         // Add sell order with 100 qty
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10000, 100))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10000, 100)).unwrap();
 
         // Partially fill with 40 qty
-        engine
-            .submit_order(create_limit_request(Side::Buy, 10000, 40))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 10000, 40)).unwrap();
 
         // Order book should show remaining 60 qty
         let book = engine.get_order_book("AAPL", 10);
@@ -1365,9 +1326,7 @@ mod tests {
         let engine = MatchingEngine::new();
 
         // Add sell order (maker)
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10000, 100))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10000, 100)).unwrap();
 
         // Buy order is the taker
         let buy_request = create_limit_request(Side::Buy, 10000, 100);
@@ -1390,20 +1349,14 @@ mod tests {
 
         assert_eq!(engine.orders_in_book(), 0);
 
-        engine
-            .submit_order(create_limit_request(Side::Buy, 10000, 100))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 10000, 100)).unwrap();
         assert_eq!(engine.orders_in_book(), 1);
 
-        engine
-            .submit_order(create_limit_request(Side::Sell, 10100, 50))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Sell, 10100, 50)).unwrap();
         assert_eq!(engine.orders_in_book(), 2);
 
         // Add matching order that fills one
-        engine
-            .submit_order(create_limit_request(Side::Buy, 10100, 50))
-            .unwrap();
+        engine.submit_order(create_limit_request(Side::Buy, 10100, 50)).unwrap();
         assert_eq!(engine.orders_in_book(), 1); // Sell filled, buy still there
     }
 
@@ -1448,5 +1401,4 @@ mod tests {
         assert!(in_book <= 1000);
         assert!(matched <= 1000);
     }
-
 }
