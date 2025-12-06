@@ -27,6 +27,7 @@ pub enum OrderStatus {
     /// Order has been accepted and added to the book
     Accepted,
     /// Order has been partially filled (only for LIMIT orders)
+    #[serde(rename = "PARTIAL_FILL")]
     PartialFill,
     /// Order has been completely filled
     Filled,

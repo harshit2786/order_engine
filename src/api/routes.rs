@@ -11,10 +11,10 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         // Order endpoints
         .route("/api/v1/orders", post(handlers::submit_order))
-        .route("/api/v1/orders/:order_id", get(handlers::get_order_status))
-        .route("/api/v1/orders/:order_id", delete(handlers::cancel_order))
+        .route("/api/v1/orders/{order_id}", get(handlers::get_order_status))
+        .route("/api/v1/orders/{order_id}", delete(handlers::cancel_order))
         // Order book endpoint
-        .route("/api/v1/orderbook/:symbol", get(handlers::get_order_book))
+        .route("/api/v1/orderbook/{symbol}", get(handlers::get_order_book))
         // Metrics endpoint
         .route("/metrics", get(handlers::get_metrics))
         // Health check
