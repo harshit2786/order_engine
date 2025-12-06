@@ -9,7 +9,7 @@ use crate::models::order::Order;
 pub struct PriceLevel {
     pub price: u64,
     /// Orders stored in FIFO order (front = oldest, back = newest)
-    orders: VecDeque<Order>,
+    pub orders: VecDeque<Order>,
     /// Total quantity available at this price level
     total_quantity: u64,
 }

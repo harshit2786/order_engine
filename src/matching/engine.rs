@@ -269,17 +269,19 @@ impl MatchingEngine {
     }
 
     /// Matches orders at a specific price level
+        /// Matches orders at a specific price level
     fn match_at_price_level(
         &self,
         incoming_order: &mut Order,
         book: &mut OrderBook,
         book_side: Side,
         price: u64,
-        result: &mut MatchResult
+        result: &mut MatchResult,
     ) {
-        // Track orders to remove
+        // Track orders to remove and quantity updates
         let mut orders_to_remove: Vec<Uuid> = Vec::new();
         let mut filled_order_ids_and_qty: Vec<(Uuid, u64)> = Vec::new();
+        let mut total_quantity_to_reduce: u64 = 0;
 
         // Scope the mutable borrow of book_levels
         {
@@ -290,23 +292,19 @@ impl MatchingEngine {
 
             let level = match book_levels.get_mut(&price) {
                 Some(l) => l,
-                None => {
-                    return;
-                }
+                None => return,
             };
 
             while !incoming_order.is_filled() {
                 let resting_order = match level.front_mut() {
                     Some(o) => o,
-                    None => {
-                        break;
-                    }
+                    None => break,
                 };
 
                 // Calculate fill quantity
                 let fill_qty = std::cmp::min(
                     incoming_order.remaining_quantity(),
-                    resting_order.remaining_quantity()
+                    resting_order.remaining_quantity(),
                 );
 
                 // Determine buyer and seller
@@ -324,7 +322,7 @@ impl MatchingEngine {
                     fill_qty,
                     buyer_id,
                     seller_id,
-                    incoming_order.side
+                    incoming_order.side,
                 );
 
                 // Update orders
@@ -334,17 +332,21 @@ impl MatchingEngine {
                 // Track for storage update
                 filled_order_ids_and_qty.push((resting_order_id, fill_qty));
 
+                // Track quantity to reduce from level
+                total_quantity_to_reduce += fill_qty;
+
                 result.trades.push(trade);
 
                 // If resting order is filled, remove from level
                 if resting_order.is_filled() {
-                    level.pop_front();
+                    // Pop without reducing quantity (we'll do it separately)
+                    level.orders.pop_front();
                     orders_to_remove.push(resting_order_id);
-                } else {
-                    // Partially filled, reduce level quantity
-                    level.reduce_total_quantity(fill_qty);
                 }
             }
+
+            // Reduce the total quantity for all fills at once
+            level.reduce_total_quantity(total_quantity_to_reduce);
         }
         // Mutable borrow of book_levels ends here
 
