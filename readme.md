@@ -144,3 +144,16 @@ cargo test
 ```
   - Three performance tests will fail when cargo test is run normally. These tests need to be run individually using `cargo test --release test_http_latency_measurements -- --nocapture`, `cargo test --release test_http_throughput_concurrent -- --nocapture` and `cargo test --release load_test_60_seconds_http -- --nocapture` respectively.
 
+# Performance Result
+
+1. Latency Measurement Test Result:
+<img width="672" height="231" alt="Screenshot 2025-12-06 at 4 19 00 PM" src="https://github.com/user-attachments/assets/a9d5c9db-91e6-4353-9016-0f298b71ead2" />
+
+2. Throughput Result:
+<img width="678" height="221" alt="Screenshot 2025-12-06 at 4 20 42 PM" src="https://github.com/user-attachments/assets/5e36215c-eab6-48c3-8974-604e8f75547e" />
+
+3. 60-second load test with concurrent clients:
+<img width="692" height="483" alt="Screenshot 2025-12-06 at 4 24 00 PM" src="https://github.com/user-attachments/assets/c2d362f6-fedc-4af9-bf31-30e3b051ac06" />
+
+
+
